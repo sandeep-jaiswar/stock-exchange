@@ -2,10 +2,15 @@
 
 set -e
 
-export AWS_ACCESS_KEY_ID=test
-export AWS_SECRET_ACCESS_KEY=test
-export AWS_DEFAULT_REGION=us-east-1
-export AWS_ENDPOINT_URL=http://localhost:4566
+# Default LocalStack endpoint if not passed
+ENDPOINT_URL="${ENDPOINT_URL:-http://host.docker.internal:4566}"
+
+if [[ -z "$ENDPOINT_URL" ]]; then
+  echo "ERROR: ENDPOINT_URL is empty. Aborting."
+  exit 1
+fi
+
+echo "Using endpoint: $ENDPOINT_URL"
 
 echo "Deploying SQS..."
 docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
@@ -16,7 +21,7 @@ docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
   cloudformation create-stack \
   --stack-name sqs-stack \
   --template-body file://infra/cloudformation/sqs.yml \
-  --endpoint-url http://host.docker.internal:4566 \
+  --endpoint-url "$ENDPOINT_URL" \
   --region us-east-1
 
 echo "Deploying RDS..."
@@ -28,5 +33,5 @@ docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
   cloudformation create-stack \
   --stack-name rds-stack \
   --template-body file://infra/cloudformation/rds.yml \
-  --endpoint-url http://host.docker.internal:4566 \
+  --endpoint-url "$ENDPOINT_URL" \
   --region us-east-1
