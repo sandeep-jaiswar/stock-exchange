@@ -11,7 +11,7 @@ docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
   cloudformation create-stack \
   --stack-name sqs-stack \
   --template-body file://infra/cloudformation/sqs.yml \
-  --endpoint-url $ENDPOINT_URL \
+  --endpoint-url "$ENDPOINT_URL" \
   --region us-east-1
 
 echo "Deploying RDS..."
@@ -23,5 +23,5 @@ docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
   cloudformation create-stack \
   --stack-name rds-stack \
   --template-body file://infra/cloudformation/rds.yml \
-  --endpoint-url $ENDPOINT_URL \
+  --endpoint-url "$ENDPOINT_URL" \
   --region us-east-1
