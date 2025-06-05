@@ -1,0 +1,13 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Complete Infra Stack for Stock Exchange System
+
+Resources:
+  IncludeRDS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./rds.yml
+
+  IncludeSQS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./sqs.yml

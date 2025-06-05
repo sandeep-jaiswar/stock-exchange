@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SQS Queues for Stock Exchange Events
+
+Resources:
+  MarketDataQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: marketdata-events
+
+  TradeEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: trade-events
+
+Outputs:
+  MarketDataQueueURL:
+    Value: !Ref MarketDataQueue
+  TradeEventsQueueURL:
+    Value: !Ref TradeEventsQueue

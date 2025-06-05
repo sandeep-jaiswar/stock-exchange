@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS Instance for Stock Exchange
+
+Resources:
+  StockExchangeDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: stock-exchange-db
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: 15
+      MasterUsername: postgres
+      MasterUserPassword: postgres
+      DBName: stockexchange
+      Port: 5432
+      PubliclyAccessible: true
+
+Outputs:
+  RDSInstanceEndpoint:
+    Value: !GetAtt StockExchangeDB.Endpoint.Address
+    Export:
+      Name: RDSInstanceEndpoint
