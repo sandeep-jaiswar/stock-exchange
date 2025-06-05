@@ -2,6 +2,16 @@
 
 set -e
 
+# Default LocalStack endpoint if not passed
+ENDPOINT_URL="${ENDPOINT_URL:-http://host.docker.internal:4566}"
+
+if [[ -z "$ENDPOINT_URL" ]]; then
+  echo "ERROR: ENDPOINT_URL is empty. Aborting."
+  exit 1
+fi
+
+echo "Using endpoint: $ENDPOINT_URL"
+
 echo "Deploying SQS..."
 docker run --rm -v "$PWD":"$PWD" -w "$PWD" \
   -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
