@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Wait for LocalStack to be ready
+        run: |
+          for i in {1..30}; do
+            curl -s http://localhost:4566/health && break || sleep 2
+          done
+
+      - name: Deploy infra with CloudFormation
+        run: |
+          aws cloudformation deploy \
+            --template-file ./infra/your-cloudformation.yaml \
+            --stack-name stock-exchange-stack \
+            --endpoint-url $AWS_ENDPOINT_URL
+
+      - name: Verify SQS queues created
+        run: |
+          aws sqs list-queues --endpoint-url $AWS_ENDPOINT_URL
+
+      - name: Build and test Java service
+        run: ./gradlew test
+
+      - name: Build and test Next.js app
+        run: |
+          cd apps/backoffice-client
+          npm install
+          npm test
