@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Application Load Balancer for Stock Exchange Applications
+
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment (e.g., dev, staging, prod)
+    Type: String
+  VPCId:
+    Description: The ID of the VPC
+    Type: String
+  PublicSubnetIds:
+    Description: Comma-separated list of public subnet IDs for the ALB
+    Type: CommaDelimitedList
+  ApplicationSecurityGroupId:
+    Description: The ID of the security group for application tasks (needed for ALB outbound rules)
+    Type: String
+  ALBListenerPort:
+    Description: The port the ALB Listener will listen on
+    Type: Number
+    Default: 80 # Or 443 for HTTPS
+  ALBSecurityGroupIngressCidr:
+    Description: CIDR block allowed to access the ALB Listener
+    Type: String
+    Default: 0.0.0.0/0 # WARNING: Open to the internet. Restrict this in production.
+  GatewayServicePort:
+    Description: The port the Gateway service container listens on
+    Type: Number
+    Default: 8080 # Example port for the Gateway service
+  MarketDataServicePort:
+    Description: The port the Market Data service container listens on
+    Type: Number
+    Default: 8081 # Example port for the Market Data service
+  BackofficeClientServicePort:
+    Description: The port the Backoffice Client service container listens on
+    Type: Number
+    Default: 3000 # Example port for the Backoffice Client service (assuming Next.js default)
+
+
+Resources:
+
+  # Security Group for the Application Load Balancer
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-ALB-SG"
+      GroupDescription: Allow inbound traffic to the ALB and outbound to application security group
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ALBListenerPort
+          ToPort: !Ref ALBListenerPort
+          CidrIp: !Ref ALBSecurityGroupIngressCidr # Restrict this in production
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref GatewayServicePort # Allow ALB to send traffic to the Gateway service port
+          ToPort: !Ref GatewayServicePort
+          DestinationSecurityGroupId: !Ref ApplicationSecurityGroupId # To the application security group
+        - IpProtocol: tcp
+          FromPort: !Ref MarketDataServicePort # Allow ALB to send traffic to MarketData service port
+          ToPort: !Ref MarketDataServicePort
+          DestinationSecurityGroupId: !Ref ApplicationSecurityGroupId
+        - IpProtocol: tcp
+          FromPort: !Ref BackofficeClientServicePort # Allow ALB to send traffic to BackofficeClient service port
+          ToPort: !Ref BackofficeClientServicePort
+          DestinationSecurityGroupId: !Ref ApplicationSecurityGroupId
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-ALB-SG"
+
+  # Application Load Balancer
+  StockExchangeALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${EnvironmentName}-StockExchange-ALB"
+      Scheme: internet-facing # Or 'internal' if not internet-facing
+      Subnets: !Ref PublicSubnetIds # Place ALB in public subnets
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-StockExchange-ALB"
+
+  # Target Group for the Gateway Service
+  GatewayTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${EnvironmentName}-Gateway-TG"
+      Port: !Ref GatewayServicePort
+      Protocol: HTTP # Or HTTPS depending on your service
+      VpcId: !Ref VPCId
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: / # Define a health check path for your Gateway service
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: ip # Because we are using Fargate with awsvpc mode
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: Gateway
+
+  # Target Group for the Market Data Service
+  MarketDataTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${EnvironmentName}-MarketData-TG"
+      Port: !Ref MarketDataServicePort
+      Protocol: HTTP # Or HTTPS depending on your service
+      VpcId: !Ref VPCId
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: / # Define a health check path for your Market Data service
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: ip
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: MarketData
+
+  # Target Group for the Backoffice Client Service
+  BackofficeClientTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${EnvironmentName}-BackofficeClient-TG"
+      Port: !Ref BackofficeClientServicePort
+      Protocol: HTTP # Or HTTPS depending on your service
+      VpcId: !Ref VPCId
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: / # Define a health check path for your Backoffice Client service
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: ip
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: BackofficeClient
+
+  # Listener for the ALB (e.g., HTTP)
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref StockExchangeALB
+      Port: !Ref ALBListenerPort
+      Protocol: HTTP # Or HTTPS
+      DefaultActions:
+        - Type: fixed-response # Default action: return a simple response or forward to a default target group
+          FixedResponseConfig:
+            StatusCode: 404
+            ContentType: text/plain
+            Content: Not Found # Customize as needed
+
+  # Listener Rule for Gateway Service (example: route traffic to /api/gateway/*)
+  GatewayListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 10 # Rules are evaluated in priority order (lowest first) పాట
+      Conditions:
+        - Field: path-pattern
+          Values: ["/api/gateway/*"] # Example path pattern
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref GatewayTargetGroup
+
+  # Listener Rule for Market Data Service (example: route traffic to /marketdata/*)
+  MarketDataListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values: ["/marketdata/*"] # Example path pattern
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MarketDataTargetGroup
+
+  # Listener Rule for Backoffice Client Service (example: route traffic to /backoffice/* or /* for the root)
+  BackofficeClientListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 30 # Ensure this is lower priority than specific API paths if routing root traffic here
+      Conditions:
+        - Field: path-pattern
+          Values: ["/", "/backoffice/*"] # Example path pattern
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackofficeClientTargetGroup
+
+
+Outputs:
+  ALBDnsName:
+    Description: The DNS name of the Application Load Balancer
+    Value: !GetAtt StockExchangeALB.DNSName
+    Export:
+      Name: !Sub "${EnvironmentName}-StockExchangeALBDnsName"
+  ALBSecurityGroupId:
+    Description: The ID of the ALB Security Group
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub "${EnvironmentName}-ALBSecurityGroupId"
+  GatewayTargetGroupArn:
+    Description: The ARN of the Gateway Service Target Group
+    Value: !Ref GatewayTargetGroup
+    Export:
+      Name: !Sub "${EnvironmentName}-GatewayTargetGroupArn"
+  MarketDataTargetGroupArn:
+    Description: The ARN of the Market Data Service Target Group
+    Value: !Ref MarketDataTargetGroup
+    Export:
+      Name: !Sub "${EnvironmentName}-MarketDataTargetGroupArn"
+  BackofficeClientTargetGroupArn:
+    Description: The ARN of the Backoffice Client Service Target Group
+    Value: !Ref BackofficeClientTargetGroup
+    Export:
+      Name: !Sub "${EnvironmentName}-BackofficeClientTargetGroupArn"

@@ -1,23 +1,75 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: RDS Instance for Stock Exchange
 
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment (e.g., dev, staging, prod)
+    Type: String
+  DBIdentifier:
+    Description: Identifier for the database instance
+    Type: String
+    Default: stock-exchange-db
+  DBAllocatedStorage:
+    Description: Allocated storage in GB
+    Type: Number
+    Default: 20
+  DBInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.t3.micro # Change this default for production environments
+  DBEngineVersion:
+    Description: PostgreSQL engine version
+    Type: String
+    Default: 15
+  DBName:
+    Description: Name of the initial database
+    Type: String
+    Default: stockexchange
+  DBPort:
+    Description: Port for the database
+    Type: Number
+    Default: 5432
+  DBSubnetGroupName:
+    Description: Name of the DB Subnet Group
+    Type: String
+  VPCSecurityGroups:
+    Description: List of security group IDs allowed to access the DB
+    Type: CommaDelimitedList
+  # Removed MasterUsername and MasterUserPassword parameters
+
 Resources:
   StockExchangeDB:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: stock-exchange-db
-      AllocatedStorage: 20
-      DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: !Sub "${EnvironmentName}-${DBIdentifier}"
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
       Engine: postgres
-      EngineVersion: 15
-      MasterUsername: postgres
-      MasterUserPassword: postgres
-      DBName: stockexchange
-      Port: 5432
-      PubliclyAccessible: true
+      EngineVersion: !Ref DBEngineVersion
+      # MasterUsername and MasterUserPassword are NOT specified here.
+      # Initial credentials must be set securely (e.g., using Secrets Manager rotation,
+      # a Custom Resource, or by connecting from an EC2/Lambda briefly after creation).
+      # The application connecting to this DB will retrieve credentials from Secrets Manager.
+      DBName: !Ref DBName
+      Port: !Ref DBPort
+      PubliclyAccessible: false # Keep this as false for security
+      DBSnapshotIdentifier: # Add if restoring from a snapshot
+      LicenseModel: postgresql-license
+      VPCSecurityGroups: !Ref VPCSecurityGroups
+      DBSubnetGroupName: !Ref DBSubnetGroupName
+      # MultiAZ: true # Uncomment and set to true for high availability in production
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
 Outputs:
   RDSInstanceEndpoint:
+    Description: Endpoint address of the RDS instance
     Value: !GetAtt StockExchangeDB.Endpoint.Address
     Export:
-      Name: RDSInstanceEndpoint
+      Name: !Sub "${EnvironmentName}-RDSInstanceEndpoint"
+  RDSInstancePort:
+    Description: Port of the RDS instance
+    Value: !GetAtt StockExchangeDB.Endpoint.Port
+    Export:
+      Name: !Sub "${EnvironmentName}-RDSInstancePort"

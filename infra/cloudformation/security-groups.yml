@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Security Groups for Stock Exchange
+
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment (e.g., dev, staging, prod)
+    Type: String
+  VPCId:
+    Description: The ID of the VPC to deploy security groups into
+    Type: String
+  RDSDbPort:
+    Description: The port the RDS database is listening on
+    Type: Number
+    Default: 5432
+
+Resources:
+
+  # Security Group for the RDS database
+  # Allows ingress from the ApplicationSecurityGroup on the DB port
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-RDS-SG"
+      GroupDescription: Allow access to the RDS database
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref RDSDbPort
+          ToPort: !Ref RDSDbPort
+          SourceSecurityGroupId: !GetAtt ApplicationSecurityGroup.GroupId # Allow access from Application SG
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-RDS-SG"
+
+  # Security Group for Application Servers (e.g., EC2, ECS tasks)
+  # Allows inbound traffic from the ALB Security Group and outbound to RDS Security Group
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${EnvironmentName}-Application-SG"
+      GroupDescription: Allow inbound traffic from ALB and outbound to RDS
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        # Allow inbound traffic from the ALB Security Group on application ports
+        # The specific ports (8080, 8081, 3000 etc.) should be allowed based on what ALB forwards
+        # A more general rule allowing from ALB SG might be acceptable if ALB Listener handles port mapping
+        - IpProtocol: -1 # Allow all protocols/ports inbound from the ALB Security Group for simplicity
+          FromPort: -1
+          ToPort: -1
+          SourceSecurityGroupId: !GetAtt ALBSecurityGroup.GroupId # Assuming ALB SG is defined elsewhere and outputted
+      SecurityGroupEgress:
+        # Allow outbound traffic to the RDS Security Group on the DB port
+        - IpProtocol: tcp
+          FromPort: !Ref RDSDbPort
+          ToPort: !Ref RDSDbPort
+          DestinationSecurityGroupId: !GetAtt RDSSecurityGroup.GroupId
+        # Add egress rules for other necessary outbound traffic (e.g., to SQS, Secrets Manager)
+        - IpProtocol: tcp # Example: Allow HTTPS outbound for AWS API calls
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0 # Restrict this if possible (e.g., VPC endpoints)
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-Application-SG"
+
+  # Security Group for the Application Load Balancer - REMOVING from here, defining in load-balancing-alb.yml
+  # and referencing its ID here.
+  # LoadBalancerSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   ...
+
+Outputs:
+  RDSSecurityGroupId:
+    Description: The ID of the RDS Security Group
+    Value: !GetAtt RDSSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${EnvironmentName}-RDSSecurityGroupId"
+  ApplicationSecurityGroupId:
+    Description: The ID of the Application Security Group
+    Value: !GetAtt ApplicationSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${EnvironmentName}-ApplicationSecurityGroupId"
+  # LoadBalancerSecurityGroupId: # REMOVED
+  #   Description: The ID of the Load Balancer Security Group
+  #   Value: !GetAtt LoadBalancerSecurityGroup.GroupId
+  #   Export:
+  #     Name: !Sub "${EnvironmentName}-LoadBalancerSecurityGroupId"

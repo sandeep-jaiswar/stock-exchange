@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC for Stock Exchange
+
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment
+    Type: String
+  VpcCidr:
+    Description: CIDR block for the VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+Resources:
+  StockExchangeVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref StockExchangeVPC
+      CidrBlock: !Select [ 0, !Cidr !Ref VpcCidr, 2, 8 ] # 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAvailabilityZones '' ]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: Public
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref StockExchangeVPC
+      CidrBlock: !Select [ 1, !Cidr !Ref VpcCidr, 2, 8 ] # 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAvailabilityZones '' ]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Tier
+          Value: Private
+
+Outputs:
+  VPCId:
+    Description: The ID of the VPC
+    Value: !Ref StockExchangeVPC
+    Export:
+      Name: !Sub "${EnvironmentName}-VPCId"
+  PrivateSubnet1Id:
+    Description: The ID of Private Subnet 1
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub "${EnvironmentName}-PrivateSubnet1Id"
+  PublicSubnet1Id:
+    Description: The ID of Public Subnet 1
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub "${EnvironmentName}-PublicSubnet1Id"

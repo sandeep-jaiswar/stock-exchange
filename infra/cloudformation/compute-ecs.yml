@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Compute Layer for Stock Exchange Application
+
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment (e.g., dev, staging, prod)
+    Type: String
+  VPCId:
+    Description: The ID of the VPC
+    Type: String
+  PrivateSubnetIds:
+    Description: Comma-separated list of private subnet IDs for ECS tasks
+    Type: CommaDelimitedList
+  ApplicationSecurityGroupId:
+    Description: The ID of the security group for application tasks
+    Type: String
+  # Example parameters for a generic service - you'll need to define these per service
+  ServiceName:
+    Description: Name of the application service (e.g., backoffice-client, gateway)
+    Type: String
+  ContainerImage:
+    Description: Docker image URI for the application container
+    Type: String
+  ContainerPort:
+    Description: Port the application container listens on
+    Type: Number
+  DesiredCount:
+    Description: The desired number of tasks to run for the service
+    Type: Number
+    Default: 1 # Adjust for production
+
+Resources:
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${EnvironmentName}-StockExchange-Cluster"
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-StockExchange-Cluster"
+
+  # IAM Role for ECS Tasks (allows tasks to call AWS APIs)
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-ECSTaskExecutionRole"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy # Required for tasks to pull images and publish logs
+
+  # IAM Role for ECS Service (allows ECS to manage resources like Load Balancers)
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EnvironmentName}-ECSServiceRole"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "ecs.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSServiceRolePolicy # Required for ECS to manage Load Balancers
+
+  # Log Group for Container Logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${EnvironmentName}-${ServiceName}"
+      RetentionInDays: 7 # Configure as needed
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: !Ref ServiceName
+
+  # ECS Task Definition (Fargate Launch Type)
+  AppTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${EnvironmentName}-${ServiceName}-TaskDefinition"
+      RequiresCompatibilities:
+        - FARGATE # Using Fargate for serverless containers
+      NetworkMode: awsvpc
+      Cpu: 256 # Configure CPU and Memory based on your application needs
+      Memory: 512
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskExecutionRole.Arn # You'll need a Task Role for applications to access SQS, RDS, etc. - define a separate one or add policies here
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Image: !Ref ContainerImage
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+
+  # ECS Service
+  AppService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "${EnvironmentName}-${ServiceName}-Service"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref AppTaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref PrivateSubnetIds # Place tasks in private subnets
+          SecurityGroups:
+            - !Ref ApplicationSecurityGroupId # Associate with the application security group
+          AssignPublicIp: DISABLED # Do not assign public IPs to tasks in private subnets
+      # If integrating with a Load Balancer, uncomment and configure load balancers
+      # LoadBalancers:
+      #   - ContainerName: !Ref ServiceName
+      #     ContainerPort: !Ref ContainerPort
+      #     TargetGroupArn: !ImportValue !Sub "${EnvironmentName}-AppTargetGroupArn" # Assumes Target Group is exported from ALB stack
+      Role: !GetAtt ECSServiceRole.Arn # Role for the ECS Service to register/deregister with ALB
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Service
+          Value: !Ref ServiceName
+
+Outputs:
+  ECSClusterName:
+    Description: The name of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "${EnvironmentName}-ECSClusterName"
+  AppTaskDefinitionArn:
+    Description: The ARN of the application task definition
+    Value: !Ref AppTaskDefinition
+    Export:
+      Name: !Sub "${EnvironmentName}-${ServiceName}-TaskDefinitionArn"
+  AppServiceName:
+    Description: The name of the application service
+    Value: !GetAtt AppService.Name
+    Export:
+      Name: !Sub "${EnvironmentName}-${ServiceName}-ServiceName"
+  ECSTaskExecutionRoleArn:
+    Description: The ARN of the ECS task execution role
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub "${EnvironmentName}-ECSTaskExecutionRoleArn"
+  ECSServiceRoleArn:
+    Description: The ARN of the ECS service role
+    Value: !GetAtt ECSServiceRole.Arn
+    Export:
+      Name: !Sub "${EnvironmentName}-ECSServiceRoleArn"
