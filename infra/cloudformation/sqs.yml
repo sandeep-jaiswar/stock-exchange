@@ -1,19 +1,141 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: SQS Queues for Stock Exchange Events
 
+Parameters:
+  EnvironmentName:
+    Description: Name of the environment (e.g., dev, staging, prod)
+    Type: String
+  MarketDataQueueName:
+    Description: Base name for the market data events queue
+    Type: String
+    Default: marketdata-events
+  TradeEventsQueueName:
+    Description: Base name for the trade events queue
+    Type: String
+    Default: trade-events
+  EnableDeadLetterQueues:
+    Description: Whether to enable Dead-Letter Queues for SQS
+    Type: String
+    AllowedValues: [ 'true', 'false' ]
+    Default: 'true'
+  MaxReceiveCount:
+    Description: The number of times a message can be received before being moved to the DLQ
+    Type: Number
+    Default: 5
+
+Conditions:
+  CreateDLQs: !Equals [!Ref EnableDeadLetterQueues, 'true']
+
 Resources:
-  MarketDataQueue:
+  # Dead Letter Queue for Market Data Events
+  MarketDataEventsDLQ:
+    Type: AWS::SQS::Queue
+    Condition: CreateDLQs
+    Properties:
+      QueueName: !Sub "${EnvironmentName}-${MarketDataQueueName}-dlq"
+      MessageRetentionPeriod: 345600 # 4 days (default is 4 days, max is 14)
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: DLQ
+        - Key: ForQueue
+          Value: !Sub "${EnvironmentName}-${MarketDataQueueName}"
+
+  # Main Market Data Events Queue
+  MarketDataEventsQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: marketdata-events
+      QueueName: !Sub "${EnvironmentName}-${MarketDataQueueName}"
+      RedrivePolicy:
+        !If [
+          CreateDLQs,
+          {
+            deadLetterTargetArn: !GetAtt MarketDataEventsDLQ.Arn,
+            maxReceiveCount: !Ref MaxReceiveCount
+          },
+          !Ref "AWS::NoValue" # Do not apply RedrivePolicy if DLQs are not enabled
+        ]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: Main
 
+  # Dead Letter Queue for Trade Events
+  TradeEventsDLQ:
+    Type: AWS::SQS::Queue
+    Condition: CreateDLQs
+    Properties:
+      QueueName: !Sub "${EnvironmentName}-${TradeEventsQueueName}-dlq"
+      MessageRetentionPeriod: 345600 # 4 days
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: DLQ
+        - Key: ForQueue
+          Value: !Sub "${EnvironmentName}-${TradeEventsQueueName}"
+
+  # Main Trade Events Queue
   TradeEventsQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: trade-events
+      QueueName: !Sub "${EnvironmentName}-${TradeEventsQueueName}"
+      RedrivePolicy:
+        !If [
+          CreateDLQs,
+          {
+            deadLetterTargetArn: !GetAtt TradeEventsDLQ.Arn,
+            maxReceiveCount: !Ref MaxReceiveCount
+          },
+          !Ref "AWS::NoValue"
+        ]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: QueueType
+          Value: Main
 
 Outputs:
-  MarketDataQueueURL:
-    Value: !Ref MarketDataQueue
+  MarketDataEventsQueueURL:
+    Description: URL of the main market data events queue
+    Value: !Ref MarketDataEventsQueue
+    Export:
+      Name: !Sub "${EnvironmentName}-MarketDataEventsQueueURL"
   TradeEventsQueueURL:
+    Description: URL of the main trade events queue
     Value: !Ref TradeEventsQueue
+    Export:
+      Name: !Sub "${EnvironmentName}-TradeEventsQueueURL"
+  MarketDataEventsDLQURL:
+    Description: URL of the market data events dead-letter queue
+    Value: !If [CreateDLQs, !Ref MarketDataEventsDLQ, !Ref "AWS::NoValue"]
+    Export:
+      Name: !If [CreateDLQs, !Sub "${EnvironmentName}-MarketDataEventsDLQURL", !Ref "AWS::NoValue"]
+  TradeEventsDLQURL:
+    Description: URL of the trade events dead-letter queue
+    Value: !If [CreateDLQs, !Ref TradeEventsDLQ, !Ref "AWS::NoValue"]
+    Export:
+      Name: !If [CreateDLQs, !Sub "${EnvironmentName}-TradeEventsDLQURL", !Ref "AWS::NoValue"]
+  # --- New Outputs for Queue ARNs ---
+  MarketDataEventsQueueArn:
+    Description: ARN of the main market data events queue
+    Value: !GetAtt MarketDataEventsQueue.Arn
+    Export:
+      Name: !Sub "${EnvironmentName}-MarketDataEventsQueueArn"
+  TradeEventsQueueArn:
+    Description: ARN of the main trade events queue
+    Value: !GetAtt TradeEventsQueue.Arn
+    Export:
+      Name: !Sub "${EnvironmentName}-TradeEventsQueueArn"
+  MarketDataEventsDLQArn:
+    Description: ARN of the market data events dead-letter queue
+    Value: !If [CreateDLQs, !GetAtt MarketDataEventsDLQ.Arn, !Ref "AWS::NoValue"]
+    Export:
+      Name: !If [CreateDLQs, !Sub "${EnvironmentName}-MarketDataEventsDLQArn", !Ref "AWS::NoValue"]
+  TradeEventsDLQArn:
+    Description: ARN of the trade events dead-letter queue
+    Value: !If [CreateDLQs, !GetAtt TradeEventsDLQ.Arn, !Ref "AWS::NoValue"]
+    Export:
+      Name: !If [CreateDLQs, !Sub "${EnvironmentName}-TradeEventsDLQArn", !Ref "AWS::NoValue"]
